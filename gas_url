@@ -1,0 +1,101 @@
+/**
+ * BACKEND GOOGLE APPS SCRIPT (Code.gs)
+ * Menangani penerimaan data dari frontend MPI dan mengelola database Google Sheets.
+ */
+
+// Menangani permintaan HTTP POST dari Frontend
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // 1. Inisialisasi Sheet Data Soal & Sheet Hasil jika belum ada
+    const sheetSoal = getOrCreateSheet(ss, "Data Soal", [
+      "Kategori", "Nomor", "Level/Tipe", "Stimulus/Pertanyaan", 
+      "Pilihan Jawaban", "Kunci Jawaban"
+    ]);
+
+    const sheetHasil = getOrCreateSheet(ss, "Hasil", [
+      "Waktu Pengerjaan", "Nama Siswa", "Kelas", 
+      "Jumlah Jawaban Benar", "Jumlah Jawaban Salah", "Detail Inputan Jawaban"
+    ]);
+
+    // 2. Tentukan aksi berdasarkan payload yang dikirim
+    if (data.action === "save_questions") {
+      syncQuestions(sheetSoal, data.questions);
+      return createJsonResponse({ status: "success", message: "Data soal berhasil diperbarui" });
+    } 
+    
+    if (data.action === "submit_result") {
+      const timestamp = new Date();
+      sheetHasil.appendRow([
+        timestamp,
+        data.studentName,
+        data.studentClass,
+        data.correctCount,
+        data.wrongCount,
+        JSON.stringify(data.answersDetail)
+      ]);
+      return createJsonResponse({ status: "success", message: "Hasil siswa berhasil disimpan" });
+    }
+
+    return createJsonResponse({ status: "error", message: "Aksi tidak dikenal" });
+
+  } catch (error) {
+    return createJsonResponse({ status: "error", message: error.toString() });
+  }
+}
+
+// Menangani permintaan GET (untuk testing endpoint di browser)
+function doGet(e) {
+  return createJsonResponse({ status: "online", message: "Backend Web App GAS Aktif & Siap Menerima Data" });
+}
+
+/**
+ * Helper: Mengambil sheet berdasarkan nama, jika belum ada maka otomatis buat & tambahkan header.
+ */
+function getOrCreateSheet(ss, sheetName, headers) {
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    sheet.appendRow(headers);
+    // Style baris header
+    const headerRange = sheet.getRange(1, 1, 1, headers.length);
+    headerRange.setBackground("#047857");
+    headerRange.setFontColor("#FFFFFF");
+    headerRange.setFontWeight("bold");
+  }
+  return sheet;
+}
+
+/**
+ * Helper: Sinkronisasi daftar soal dari aplikasi ke Sheet "Data Soal"
+ */
+function syncQuestions(sheet, questions) {
+  // Kosongkan data lama (simpan header)
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+  }
+
+  // Masukkan baris data baru
+  questions.forEach(q => {
+    sheet.appendRow([
+      q.kategori,
+      q.nomor,
+      q.level,
+      q.stimulus,
+      JSON.stringify(q.pilihan),
+      q.kunci
+    ]);
+  });
+}
+
+/**
+ * Helper: Mengembalikan respons JSON berserta header CORS
+ */
+function createJsonResponse(data) {
+  return ContentService
+    .createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}
